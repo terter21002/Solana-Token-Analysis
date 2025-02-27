@@ -1,6 +1,6 @@
 function analyzeSolanaPriceAction() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  sheet.getRange("L3").setValue("Running... Please wait...");
+  sheet.getRange("M3").setValue("Running... Please wait...");
 
   try {
     const lastRow = sheet.getLastRow();
@@ -8,6 +8,7 @@ function analyzeSolanaPriceAction() {
     for (let row = 2; row <= lastRow; row++) {
       const tokenAddress = sheet.getRange(row, 1).getValue().trim(); // Column A
       const triggerDateInput = sheet.getRange(row, 2).getDisplayValue().trim(); // Column B
+      const timeInterval = sheet.getRange(row, 12).getValue().trim() || "1m"; // Column L (Row 12 and below), default to "1m"
 
       if (!tokenAddress || !triggerDateInput) continue;
 
@@ -16,10 +17,17 @@ function analyzeSolanaPriceAction() {
       const currentTimestamp = Math.floor(Date.now() / 1000);
 
       const supply = getTokenSupply(tokenAddress);
+      const priceHistoryAtTrigger = getPriceHistory(
+        tokenAddress,
+        launchTimestamp,
+        currentTimestamp,
+        "1m"
+      );
       const priceHistory = getPriceHistory(
         tokenAddress,
         launchTimestamp,
-        currentTimestamp
+        currentTimestamp,
+        timeInterval
       );
       const tickerSymbol = getTickerSymbol(tokenAddress);
 
@@ -27,7 +35,10 @@ function analyzeSolanaPriceAction() {
         throw new Error("No price data available for token.");
       }
 
-      const triggerPrice = findClosestPrice(priceHistory, triggerTimestamp);
+      const triggerPrice = findClosestPrice(
+        priceHistoryAtTrigger,
+        triggerTimestamp
+      );
       const postTriggerPrices = priceHistory.filter(
         (p) => p.unixTime >= triggerTimestamp
       );
@@ -117,7 +128,7 @@ function analyzeSolanaPriceAction() {
     SpreadsheetApp.getUi().alert(error.message);
     Logger.log(error);
   } finally {
-    sheet.getRange("L3").setValue("");
+    sheet.getRange("M3").setValue("");
   }
 }
 
@@ -154,10 +165,10 @@ function getTokenSupply(tokenAddress) {
   return response.data.total_supply;
 }
 
-function getPriceHistory(address, timeFrom, timeTo) {
+function getPriceHistory(address, timeFrom, timeTo, interval) {
   const url =
     `https://public-api.birdeye.so/defi/history_price?` +
-    `address=${address}&address_type=token&type=1m&` +
+    `address=${address}&address_type=token&type=${interval}&` +
     `time_from=${timeFrom}&time_to=${timeTo}`;
 
   const response = fetchData(url);
