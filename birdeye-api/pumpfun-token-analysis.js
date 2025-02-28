@@ -1,6 +1,6 @@
 function analyzeSolanaPriceAction() {
   const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
-  sheet.getRange("M3").setValue("Running... Please wait...");
+  sheet.getRange("N3").setValue("Running... Please wait...");
 
   try {
     const lastRow = sheet.getLastRow();
@@ -8,31 +8,83 @@ function analyzeSolanaPriceAction() {
     for (let row = 2; row <= lastRow; row++) {
       const tokenAddress = sheet.getRange(row, 1).getValue().trim(); // Column A
       const triggerDateInput = sheet.getRange(row, 2).getDisplayValue().trim(); // Column B
-      const timeInterval = sheet.getRange(row, 12).getValue().trim() || "1m"; // Column L (Row 12 and below), default to "1m"
+      const timeInterval = sheet.getRange(row, 12).getValue().trim() || "1m"; // Column L, default to "1m"
 
       if (!tokenAddress || !triggerDateInput) continue;
 
       const triggerTimestamp = convertToUnixTimestamp(triggerDateInput);
-      const launchTimestamp = getTokenLaunchTime(tokenAddress);
+      let launchTimestamp;
+      try {
+        launchTimestamp = getTokenLaunchTime(tokenAddress);
+      } catch (error) {
+        Logger.log(
+          `Row ${row}: Failed to retrieve token launch time for ${tokenAddress}. Error: ${error.message}`
+        );
+        sheet.getRange(row, 3, 1, 9).setValue("Error retrieving launch time");
+        continue;
+      }
+
       const currentTimestamp = Math.floor(Date.now() / 1000);
 
-      const supply = getTokenSupply(tokenAddress);
-      const priceHistoryAtTrigger = getPriceHistory(
-        tokenAddress,
-        launchTimestamp,
-        currentTimestamp,
-        "1m"
-      );
-      const priceHistory = getPriceHistory(
-        tokenAddress,
-        launchTimestamp,
-        currentTimestamp,
-        timeInterval
-      );
-      const tickerSymbol = getTickerSymbol(tokenAddress);
+      let supply;
+      try {
+        supply = getTokenSupply(tokenAddress);
+      } catch (error) {
+        Logger.log(
+          `Row ${row}: Failed to retrieve token supply for ${tokenAddress}. Error: ${error.message}`
+        );
+        sheet.getRange(row, 3, 1, 9).setValue("Error retrieving supply");
+        continue;
+      }
+
+      let priceHistoryAtTrigger;
+      try {
+        priceHistoryAtTrigger = getPriceHistory(
+          tokenAddress,
+          launchTimestamp,
+          currentTimestamp,
+          "1m"
+        );
+      } catch (error) {
+        Logger.log(
+          `Row ${row}: Failed to retrieve price history at trigger for ${tokenAddress}. Error: ${error.message}`
+        );
+        sheet.getRange(row, 3, 1, 9).setValue("Error retrieving price history");
+        continue;
+      }
+
+      let priceHistory;
+      try {
+        priceHistory = getPriceHistory(
+          tokenAddress,
+          launchTimestamp,
+          currentTimestamp,
+          timeInterval
+        );
+      } catch (error) {
+        Logger.log(
+          `Row ${row}: Failed to retrieve full price history for ${tokenAddress}. Error: ${error.message}`
+        );
+        sheet
+          .getRange(row, 3, 1, 9)
+          .setValue("Error retrieving full price history");
+        continue;
+      }
+
+      let tickerSymbol;
+      try {
+        tickerSymbol = getTickerSymbol(tokenAddress);
+      } catch (error) {
+        Logger.log(
+          `Row ${row}: Failed to retrieve ticker symbol for ${tokenAddress}. Error: ${error.message}`
+        );
+        tickerSymbol = "N/A";
+      }
 
       if (!priceHistory || priceHistory.length === 0) {
-        throw new Error("No price data available for token.");
+        Logger.log(`Row ${row}: No price data available for ${tokenAddress}.`);
+        sheet.getRange(row, 3, 1, 9).setValue("No price data");
+        continue;
       }
 
       const triggerPrice = findClosestPrice(
@@ -43,13 +95,11 @@ function analyzeSolanaPriceAction() {
         (p) => p.unixTime >= triggerTimestamp
       );
 
-      // **Find ATH before trigger (from launch time to trigger)**
       const preTriggerPrices = priceHistory.filter(
         (p) => p.unixTime < triggerTimestamp
       );
-      let athBeforeTrigger = "N/A";
-      let athBeforeTime = "N/A";
-
+      let athBeforeTrigger = "N/A",
+        athBeforeTime = "N/A";
       if (preTriggerPrices.length > 0) {
         const athBeforeEntry = preTriggerPrices.reduce(
           (max, p) => (p.value > max.value ? p : max),
@@ -59,7 +109,6 @@ function analyzeSolanaPriceAction() {
         athBeforeTime = athBeforeEntry.unixTime;
       }
 
-      // **Find ATH after trigger**
       const athEntry = postTriggerPrices.reduce(
         (max, p) => (p.value > max.value ? p : max),
         postTriggerPrices[0]
@@ -67,13 +116,11 @@ function analyzeSolanaPriceAction() {
       const athPrice = athEntry ? athEntry.value : "N/A";
       const athTime = athEntry ? athEntry.unixTime : "N/A";
 
-      // **Find lowest price between trigger and ATH**
       const preAthPrices = postTriggerPrices.filter(
         (p) => p.unixTime <= athTime
       );
-      let lowPrice = "N/A";
-      let lowTime = "N/A";
-
+      let lowPrice = "N/A",
+        lowTime = "N/A";
       if (preAthPrices.length > 0) {
         const lowEntry = preAthPrices.reduce(
           (min, p) => (p.value < min.value ? p : min),
@@ -83,7 +130,6 @@ function analyzeSolanaPriceAction() {
         lowTime = lowEntry.unixTime;
       }
 
-      // **Calculate percentage changes**
       const marketCapAtTrigger = triggerPrice * supply;
       const athBeforeTriggerMarketCap = athBeforeTrigger * supply;
       const lowestPercentageDrop =
@@ -95,40 +141,38 @@ function analyzeSolanaPriceAction() {
           ? (((athPrice - triggerPrice) / triggerPrice) * 100).toFixed(2) + "%"
           : "N/A";
 
-      // **Output to sheet**
-      sheet.getRange(row, 3).setValue(marketCapAtTrigger.toFixed(2)); // C - Market Cap at Trigger
+      sheet.getRange(row, 3).setValue(marketCapAtTrigger.toFixed(2));
       sheet
         .getRange(row, 4)
-        .setValue(athPrice !== "N/A" ? (athPrice * supply).toFixed(2) : "N/A"); // D - Market Cap ATH
-      sheet.getRange(row, 5).setValue(increasePercentageUp); // E - % Increase to ATH
+        .setValue(athPrice !== "N/A" ? (athPrice * supply).toFixed(2) : "N/A");
+      sheet.getRange(row, 5).setValue(increasePercentageUp);
       sheet
         .getRange(row, 6)
-        .setValue(formatDuration(triggerTimestamp, athTime)); // F - Duration to ATH
-      sheet.getRange(row, 7).setValue(lowestPercentageDrop); // G - Lowest % Drop
+        .setValue(formatDuration(triggerTimestamp, athTime));
+      sheet.getRange(row, 7).setValue(lowestPercentageDrop);
       sheet
         .getRange(row, 8)
-        .setValue(formatDuration(triggerTimestamp, lowTime)); // H - Duration to Lowest Price
+        .setValue(formatDuration(triggerTimestamp, lowTime));
       sheet
         .getRange(row, 9)
         .setValue(
-          athBeforeTriggerMarketCap.toFixed(2) !== "N/A"
+          athBeforeTriggerMarketCap !== "N/A"
             ? athBeforeTriggerMarketCap.toFixed(2)
             : "N/A"
-        ); // I - ATH Before Trigger
+        );
       sheet
         .getRange(row, 10)
         .setValue(
           athBeforeTime !== "N/A"
             ? formatDuration(athBeforeTime, triggerTimestamp)
             : "N/A"
-        ); // J - Time from ATH Before Trigger
-      sheet.getRange(row, 11).setValue(tickerSymbol); // K - Ticker Symbol
+        );
+      sheet.getRange(row, 11).setValue(tickerSymbol);
     }
   } catch (error) {
-    SpreadsheetApp.getUi().alert(error.message);
-    Logger.log(error);
+    Logger.log(`General error: ${error.message}`);
   } finally {
-    sheet.getRange("M3").setValue("");
+    sheet.getRange("N3").setValue("");
   }
 }
 
