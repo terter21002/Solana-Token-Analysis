@@ -44,6 +44,6 @@ MIT License
 - Solscan API
 - Birdeye API
   
-## Contact 📬
+## 📬 Contact 
 For support, feature requests, or collaboration inquiries, contact us via Telegram:  
 **[@terter21002](https://t.me/terter21002)**
