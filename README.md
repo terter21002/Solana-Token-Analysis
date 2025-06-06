@@ -40,11 +40,10 @@ This script uses the following APIs:
 ## 📘 License
 MIT License
 
-
-## Contact 📬
-For support, feature requests, or collaboration inquiries, contact us via Telegram:  
-**[@terter21002](https://t.me/terter21002)**
-
 ## 💡 Credits
 - Solscan API
 - Birdeye API
+  
+## Contact 📬
+For support, feature requests, or collaboration inquiries, contact us via Telegram:  
+**[@terter21002](https://t.me/terter21002)**
